@@ -1,0 +1,5 @@
+fire==0.4.0
+gltflib==1.0.6
+kaitaistruct==0.9
+Pillow==8.1.2
+PyGLM==1.1.7
