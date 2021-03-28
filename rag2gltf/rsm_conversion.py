@@ -15,8 +15,9 @@ from kaitaistruct import KaitaiStream  # type: ignore
 
 from bounding_box import calculate_model_bounding_box, BoundingBox
 from image_conversion import convert_bmp_to_png, convert_tga_to_png
+from node import Node as AbstractNode, extract_nodes
 from parsing.rsm import Rsm
-from utils import mat3tomat4, decode_zstr
+from utils import mat3tomat4, decode_string, rag_mat4_mul
 
 
 def convert_rsm(rsm_file: str,
@@ -25,11 +26,13 @@ def convert_rsm(rsm_file: str,
     rsm_file_path = Path(rsm_file)
     rsm_obj = _parse_rsm_file(rsm_file_path)
 
-    (gltf_resources, gltf_images, gltf_textures,
-     gltf_materials) = _convert_textures(rsm_obj, Path(data_folder))
+    (gltf_resources, gltf_images, gltf_textures, gltf_materials,
+     tex_id_by_node) = _convert_textures(rsm_obj, Path(data_folder))
 
+    nodes = extract_nodes(rsm_obj)
     (resources, gltf_buffers, gltf_buffer_views, gltf_accessors, gltf_meshes,
-     gltf_nodes, gltf_root_nodes) = _convert_nodes(rsm_obj)
+     gltf_nodes, gltf_root_nodes) = _convert_nodes(rsm_obj.version, nodes,
+                                                   tex_id_by_node)
     gltf_resources += resources
 
     model = GLTFModel(
@@ -68,14 +71,31 @@ def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
 def _convert_textures(
     rsm_obj: Rsm, data_folder_path: Path
 ) -> typing.Tuple[typing.List[FileResource], typing.List[Image],
-                  typing.List[Texture], typing.List[Material]]:
+                  typing.List[Texture], typing.List[Material], typing.Dict[
+                      str, list]]:
     gltf_resources = []
     gltf_images = []
     gltf_textures = []
     gltf_materials = []
+    tex_id_by_node: typing.Dict[str, list] = {}
 
-    for tex_id, name_1252 in enumerate(rsm_obj.texture_names):
-        texture_path = PureWindowsPath(decode_zstr(name_1252))
+    if rsm_obj.version >= 0x203:
+        texture_list: typing.List[Rsm.String] = []
+        for node in rsm_obj.nodes:
+            node_name = decode_string(node.name)
+            tex_id_by_node[node_name] = []
+            for texture in node.texture_names:
+                try:
+                    tex_id = texture_list.index(texture)
+                    tex_id_by_node[node_name] += [tex_id]
+                except ValueError:
+                    texture_list.append(texture)
+                    tex_id_by_node[node_name] += [len(texture_list) - 1]
+    else:
+        texture_list = rsm_obj.texture_names
+
+    for tex_id, name_1252 in enumerate(texture_list):
+        texture_path = PureWindowsPath(decode_string(name_1252))
         full_texture_path = data_folder_path / "texture" / texture_path
         texture_data: typing.Union[io.BytesIO, typing.BinaryIO]
 
@@ -103,33 +123,45 @@ def _convert_textures(
                      doubleSided=True,
                      alphaMode=alpha_mode))
 
-    return (gltf_resources, gltf_images, gltf_textures, gltf_materials)
+    return (gltf_resources, gltf_images, gltf_textures, gltf_materials,
+            tex_id_by_node)
 
 
-def _convert_nodes(rsm_obj: Rsm):
+def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
+                   tex_id_by_node: typing.Dict[str, list]):
     gltf_buffer_views = []
     gltf_accessors: typing.List[Accessor] = []
     gltf_meshes = []
-    gltf_nodes = []
+    gltf_nodes: typing.List[Node] = []
     gltf_root_nodes = []
 
-    model_bbox = calculate_model_bounding_box(rsm_obj)
+    model_bbox = calculate_model_bounding_box(rsm_version, nodes)
+    for node in nodes:
+        if node.parent is None:
+            _compute_transform_matrices(rsm_version, node,
+                                        len(nodes) == 0, model_bbox)
+
     nodes_children: typing.Dict[str, typing.List[int]] = {}
     vertex_bytearray = bytearray()
     tex_vertex_bytearray = bytearray()
     byteoffset = 0
     tex_byteoffset = 0
-    for node_id, node in enumerate(rsm_obj.nodes):
-        node_name = decode_zstr(node.name)
-        parent_node_name = decode_zstr(node.parent_name)
-        is_root_node = len(parent_node_name) == 0
-        if not is_root_node:
-            if parent_node_name in nodes_children:
-                nodes_children[parent_node_name] += [node_id]
+    for node_id, node in enumerate(nodes):
+        rsm_node = node.impl
+        node_name = decode_string(rsm_node.name)
+        if node.parent is not None:
+            parent_name = decode_string(node.parent.impl.name)
+            if parent_name in nodes_children:
+                nodes_children[parent_name] += [node_id]
             else:
-                nodes_children[parent_node_name] = [node_id]
+                nodes_children[parent_name] = [node_id]
 
-        vertices_by_texture = _sort_vertices_by_texture(node)
+        if rsm_version >= 0x203:
+            node_tex_ids = tex_id_by_node[node_name]
+        else:
+            node_tex_ids = rsm_node.texture_ids
+        vertices_by_texture = _sort_vertices_by_texture(rsm_node, node_tex_ids)
+
         gltf_primitives = []
         for tex_id, vertices in vertices_by_texture.items():
             # Model vertices
@@ -180,15 +212,11 @@ def _convert_nodes(rsm_obj: Rsm):
             tex_byteoffset += tex_bytelen
 
         gltf_meshes.append(Mesh(primitives=gltf_primitives))
-
-        nodeview_matrix = _generate_nodeview_matrix(node, is_root_node,
-                                                    rsm_obj.node_count == 1,
-                                                    model_bbox)
         gltf_nodes.append(
             Node(name=node_name,
                  mesh=node_id,
-                 matrix=sum(nodeview_matrix.to_list(), [])))
-        if is_root_node:
+                 matrix=sum(node.gltf_transform_matrix.to_list(), [])))
+        if node.parent is None:
             gltf_root_nodes.append(node_id)
 
     # Register vertex buffers
@@ -204,28 +232,31 @@ def _convert_nodes(rsm_obj: Rsm):
     ]
 
     # Update nodes' children
-    for node in gltf_nodes:
-        node.children = nodes_children.get(node.name)
+    for gltf_node in gltf_nodes:
+        children = nodes_children.get(gltf_node.name)
+        gltf_node.children = [] if children is None else children
 
     return (gltf_resources, gltf_buffers, gltf_buffer_views, gltf_accessors,
             gltf_meshes, gltf_nodes, gltf_root_nodes)
 
 
-def _sort_vertices_by_texture(node: Rsm.Node) -> typing.Dict[int, list]:
-    vertices_by_texture: typing.Dict[int, list] = {
-        tex_id: [[], []]
-        for tex_id in node.texture_ids
-    }
+def _sort_vertices_by_texture(
+        node: Rsm.Node,
+        node_tex_ids: typing.List[int]) -> typing.Dict[int, list]:
+    vertices_by_texture: typing.Dict[int, list] = {}
 
-    for face_info in node.faces_info:
-        v_ids = face_info.node_vertex_ids
+    for face_info in node.faces:
+        v_ids = face_info.mesh_vertex_ids
         tv_ids = face_info.texture_vertex_ids
-        vs = node.node_vertices
+        vs = node.mesh_vertices
         t_vs = node.texture_vertices
-        tex_id = node.texture_ids[face_info.texture_id]
+        tex_id = node_tex_ids[face_info.texture_id]
+
         for i in range(3):
             vertex = vs[v_ids[i]]
             tex_vertex = t_vs[tv_ids[i]]
+            if tex_id not in vertices_by_texture:
+                vertices_by_texture[tex_id] = [[], []]
 
             vertices_by_texture[tex_id][0] += [tuple(vertex.position)]
             vertices_by_texture[tex_id][1] += [(tex_vertex.position[0],
@@ -257,13 +288,38 @@ def _calculate_vertices_bounds(
     return min_v, max_v
 
 
-def _generate_nodeview_matrix(node: Rsm.Node, is_root_node: bool,
-                              is_only_node: bool,
-                              model_bbox: BoundingBox) -> glm.mat4:
+def _compute_transform_matrices(rsm_version: int, node: AbstractNode,
+                                is_only_node: bool,
+                                model_bbox: BoundingBox) -> None:
+    if rsm_version >= 0x200:
+        (node.local_transform_matrix,
+         node.final_transform_matrix) = _generate_nodeview_matrix2(
+             rsm_version, node)
+        if node.parent:
+            node.gltf_transform_matrix = glm.inverse(
+                node.parent.final_transform_matrix
+            ) * node.final_transform_matrix
+        else:
+            node.gltf_transform_matrix = node.final_transform_matrix
+    elif rsm_version >= 0x100:
+        node.gltf_transform_matrix = _generate_nodeview_matrix1(
+            rsm_version, node, is_only_node, model_bbox)
+    else:
+        raise ValueError("Invalid RSM file version")
+
+    for child in node.children:
+        _compute_transform_matrices(rsm_version, child, is_only_node,
+                                    model_bbox)
+
+
+def _generate_nodeview_matrix1(rsm_version: int, node: AbstractNode,
+                               is_only_node: bool,
+                               model_bbox: BoundingBox) -> glm.mat4:
+    rsm_node = node.impl
     # Model view
     # Translation
-    nodeview_matrix = glm.mat4(1.0)
-    if is_root_node:
+    nodeview_matrix = glm.mat4()
+    if node.parent is None:
         # Z axis is in the opposite direction in glTF
         nodeview_matrix = glm.rotate(nodeview_matrix, math.pi,
                                      glm.vec3(1.0, 0.0, 0.0))
@@ -282,30 +338,95 @@ def _generate_nodeview_matrix(node: Rsm.Node, is_root_node: bool,
         nodeview_matrix = glm.rotate(nodeview_matrix, -math.pi / 2,
                                      glm.vec3(1.0, 0.0, 0.0))
         nodeview_matrix = glm.translate(nodeview_matrix,
-                                        glm.vec3(node.info.position))
+                                        glm.vec3(rsm_node.info.position))
 
     # Figure out the initial rotation
-    if node.rot_key_count == 0:
+    if len(rsm_node.rot_key_frames) == 0:
         # Static model
-        if node.info.rotation_angle > 0.01:
+        if rsm_node.info.rotation_angle > 0.01:
             nodeview_matrix = glm.rotate(
                 nodeview_matrix,
-                glm.radians(node.info.rotation_angle * 180.0 / math.pi),
-                glm.vec3(node.info.rotation_axis))
+                glm.radians(rsm_node.info.rotation_angle * 180.0 / math.pi),
+                glm.vec3(rsm_node.info.rotation_axis))
     else:
         # Animated model
-        quaternion = glm.quat(node.rot_key_frames[0].quaternion)
-        nodeview_matrix *= glm.mat4(quaternion)
+        key_frame = rsm_node.rot_key_frames[0]
+        quaternion = glm.normalize(
+            glm.quat(key_frame.quaternion[3], key_frame.quaternion[0],
+                     key_frame.quaternion[1], key_frame.quaternion[2]))
+        nodeview_matrix *= glm.mat4_cast(quaternion)
 
     # Scaling
-    nodeview_matrix = glm.scale(nodeview_matrix, glm.vec3(node.info.scale))
+    nodeview_matrix = glm.scale(nodeview_matrix, glm.vec3(rsm_node.info.scale))
 
     # Node view
     if is_only_node:
         nodeview_matrix = glm.translate(nodeview_matrix, -model_bbox.range)
-    elif not is_root_node:
+    elif node.parent is not None:
         nodeview_matrix = glm.translate(nodeview_matrix,
-                                        glm.vec3(node.info.offset_vector))
-    nodeview_matrix *= mat3tomat4(node.info.offset_matrix)
+                                        glm.vec3(rsm_node.info.offset_vector))
+    nodeview_matrix *= mat3tomat4(rsm_node.info.offset_matrix)
 
     return nodeview_matrix
+
+
+def _generate_nodeview_matrix2(
+        rsm_version: int,
+        node: AbstractNode) -> typing.Tuple[glm.mat4, glm.mat4]:
+    # Transformations which are inherited by children
+    local_transform_matrix = glm.mat4()
+    rsm_node = node.impl
+
+    # Scaling
+    if len(rsm_node.scale_key_frames) > 0:
+        local_transform_matrix = glm.scale(
+            local_transform_matrix,
+            glm.vec3(rsm_node.scale_key_frames[0].scale))
+
+    # Rotation
+    if len(rsm_node.rot_key_frames) > 0:
+        # Animated model
+        key_frame = rsm_node.rot_key_frames[0]
+        quaternion = glm.quat(key_frame.quaternion[3], key_frame.quaternion[0],
+                              key_frame.quaternion[1], key_frame.quaternion[2])
+        local_transform_matrix *= glm.mat4_cast(quaternion)
+    else:
+        # Static model
+        local_transform_matrix = rag_mat4_mul(
+            local_transform_matrix, mat3tomat4(rsm_node.info.offset_matrix))
+        if node.parent:
+            parent_offset_matrix = mat3tomat4(
+                node.parent.impl.info.offset_matrix)
+            local_transform_matrix = rag_mat4_mul(
+                local_transform_matrix, glm.inverse(parent_offset_matrix))
+
+    # Translation
+    if rsm_version >= 0x203 and len(rsm_node.pos_key_frames) > 0:
+        key_frame = rsm_node.pos_key_frames[0]
+        position = glm.vec3(key_frame.position)
+    elif node.parent:
+        position = glm.vec3(rsm_node.info.offset_vector) - \
+            glm.vec3(node.parent.impl.info.offset_vector)
+        parent_offset_matrix = mat3tomat4(node.parent.impl.info.offset_matrix)
+        position = glm.vec3(
+            glm.inverse(parent_offset_matrix) * glm.vec4(position, 1.0))
+    else:
+        position = glm.vec3(rsm_node.info.offset_vector)
+
+    # Transformations which are applied only to this node
+    final_transform_matrix = copy.copy(local_transform_matrix)
+    # Reset translation transformation to `position`
+    final_transform_matrix[3] = glm.vec4(position, 1.0)
+
+    # Inherit transformations from ancestors
+    parent = node.parent
+    while parent:
+        final_transform_matrix = rag_mat4_mul(final_transform_matrix,
+                                              parent.local_transform_matrix)
+        parent = parent.parent
+
+    if node.parent:
+        parent_translation = glm.vec3(node.parent.final_transform_matrix[3])
+        final_transform_matrix[3] += glm.vec4(parent_translation, 0.0)
+
+    return (local_transform_matrix, final_transform_matrix)

@@ -4,8 +4,9 @@ import typing
 
 import glm  # type: ignore
 
+from node import Node
 from parsing.rsm import Rsm
-from utils import mat3tomat4, decode_zstr
+from utils import mat3tomat4, decode_string
 
 
 class BoundingBox:
@@ -18,13 +19,20 @@ class BoundingBox:
         self.center = glm.vec3()
 
 
-def calculate_model_bounding_box(rsm_obj: Rsm) -> BoundingBox:
-    nodes_bboxes = _calculate_nodes_bounding_boxes(rsm_obj.nodes)
+def calculate_model_bounding_box(rsm_version: int,
+                                 nodes: typing.List[Node]) -> BoundingBox:
+    if rsm_version >= 0x200:
+        # TODO
+        return BoundingBox()
+
+    _calculate_nodes_bounding_boxes(rsm_version, nodes)
     bbox = BoundingBox()
     for i in range(3):
-        for j in range(rsm_obj.node_count):
-            bbox.max[i] = max(bbox.max[i], nodes_bboxes[j].max[i])
-            bbox.min[i] = min(bbox.min[i], nodes_bboxes[j].min[i])
+        for node in nodes:
+            if node.bbox is None:
+                raise ValueError("Invalid bouding box")
+            bbox.max[i] = max(bbox.max[i], node.bbox.max[i])
+            bbox.min[i] = min(bbox.min[i], node.bbox.min[i])
 
         bbox.offset[i] = (bbox.max[i] + bbox.min[i]) / 2.0
         bbox.range[i] = (bbox.max[i] - bbox.min[i]) / 2.0
@@ -33,50 +41,52 @@ def calculate_model_bounding_box(rsm_obj: Rsm) -> BoundingBox:
     return bbox
 
 
-def _calculate_nodes_bounding_boxes(
-        nodes: typing.List[Rsm.Node]) -> typing.List[BoundingBox]:
-    return _calculate_node_bounding_box(nodes, 0, [BoundingBox()] * len(nodes))
+def _calculate_nodes_bounding_boxes(version: int,
+                                    nodes: typing.List[Node]) -> None:
+    if len(nodes) == 0:
+        return
+
+    for node in nodes:
+        if node.parent is None:
+            _calculate_node_bounding_box(version, len(nodes), node)
 
 
 def _calculate_node_bounding_box(
-    nodes: typing.List[Rsm.Node],
-    node_id: int,
-    bboxes: typing.List[BoundingBox],
-    matrix: glm.mat4 = glm.mat4(1.0)
-) -> typing.List[BoundingBox]:
-    parent_name = decode_zstr(nodes[node_id].parent_name)
-    node = nodes[node_id]
+    version: int,
+    node_count: int,
+    node: Node,
+    matrix: glm.mat4 = glm.mat4(1.0)) -> None:
+    parent = node.parent
+    rsm_node = node.impl
     bbox = BoundingBox()
 
-    if len(parent_name) == 0:
-        matrix = glm.mat4(1.0)
-    else:
-        matrix = glm.translate(matrix, glm.vec3(node.info.position))
+    if parent is not None:
+        matrix = glm.translate(matrix, glm.vec3(rsm_node.info.position))
 
-    if node.rot_key_count == 0:
-        if node.info.rotation_angle > 0.01:
+    if rsm_node.rot_key_count == 0:
+        if rsm_node.info.rotation_angle > 0.01:
             matrix = glm.rotate(
                 matrix,
-                glm.radians(node.info.rotation_angle * 180.0 / math.pi),
-                glm.vec3(node.info.rotation_axis))
+                glm.radians(rsm_node.info.rotation_angle * 180.0 / math.pi),
+                glm.vec3(rsm_node.info.rotation_axis))
     else:
-        quaternion = glm.quat(node.rot_key_frames[0].quaternion)
-        matrix *= glm.mat4(glm.normalize(quaternion))
+        quaternion = glm.quat(*rsm_node.rot_key_frames[0].quaternion)
+        matrix *= glm.mat4_cast(glm.normalize(quaternion))
 
-    matrix = glm.scale(matrix, glm.vec3(node.info.scale))
+    matrix = glm.scale(matrix, glm.vec3(rsm_node.info.scale))
 
     local_matrix = copy.copy(matrix)
 
-    offset_matrix = mat3tomat4(node.info.offset_matrix)
-    if len(nodes) > 1:
+    offset_matrix = mat3tomat4(rsm_node.info.offset_matrix)
+    if node_count > 1:
         local_matrix = glm.translate(local_matrix,
-                                     glm.vec3(node.info.offset_vector))
+                                     glm.vec3(rsm_node.info.offset_vector))
     local_matrix *= offset_matrix
 
-    for i in range(node.node_vertex_count):
-        x = node.node_vertices[i].position[0]
-        y = node.node_vertices[i].position[1]
-        z = node.node_vertices[i].position[2]
+    for i in range(rsm_node.mesh_vertex_count):
+        x = rsm_node.mesh_vertices[i].position[0]
+        y = rsm_node.mesh_vertices[i].position[1]
+        z = rsm_node.mesh_vertices[i].position[2]
 
         v = glm.vec3()
         v[0] = local_matrix[0][0] * x + local_matrix[1][0] * y + local_matrix[
@@ -95,12 +105,6 @@ def _calculate_node_bounding_box(
         bbox.range[i] = (bbox.max[i] - bbox.min[i]) / 2.0
         bbox.center[i] = bbox.min[i] + bbox.range[i]
 
-    bboxes[node_id] = bbox
-    node_name = decode_zstr(node.name)
-    for other_node_id in range(len(nodes)):
-        parent_name = decode_zstr(nodes[other_node_id].parent_name)
-        if parent_name == node_name:
-            bboxes = _calculate_node_bounding_box(nodes, other_node_id, bboxes,
-                                                  matrix)
-
-    return bboxes
+    node.bbox = bbox
+    for child in node.children:
+        _calculate_node_bounding_box(version, node_count, child, matrix)

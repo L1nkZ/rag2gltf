@@ -1,6 +1,6 @@
 # rag2gltf
 
-Command-line utility to convert RSM models to glTF 2.0.
+Command-line utility to convert RSM1 and RSM2 models to glTF 2.0.
 
 ## Prerequisites
 

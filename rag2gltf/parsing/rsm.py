@@ -33,32 +33,57 @@ class Rsm(KaitaiStruct):
         self.animation_count = self._io.read_s4le()
         self.shading_type = KaitaiStream.resolve_enum(Rsm.Shading,
                                                       self._io.read_s4le())
-        self.alpha = self._io.read_u1()
-        self.reserved = self._io.read_bytes(16)
-        self.texture_count = self._io.read_s4le()
-        self.texture_names = [None] * (self.texture_count)
-        for i in range(self.texture_count):
-            self.texture_names[i] = self._io.read_bytes(40)
+        if self._root.version >= 260:
+            self.alpha = self._io.read_u1()
 
-        self.main_node_name = self._io.read_bytes(40)
+        if self._root.version < 512:
+            self.reserved = self._io.read_bytes(16)
+
+        if self._root.version >= 514:
+            self.frame_rate_per_second = self._io.read_f4le()
+
+        if self._root.version <= 514:
+            self.texture_count = self._io.read_s4le()
+
+        if self._root.version <= 514:
+            self.texture_names = [None] * (self.texture_count)
+            for i in range(self.texture_count):
+                self.texture_names[i] = Rsm.String(self._io, self, self._root)
+
+        if self._root.version >= 514:
+            self.root_node_count = self._io.read_s4le()
+
+        if self._root.version >= 514:
+            self.root_node_names = [None] * (self.root_node_count)
+            for i in range(self.root_node_count):
+                self.root_node_names[i] = Rsm.String(self._io, self,
+                                                     self._root)
+
+        if self._root.version < 512:
+            self.root_node_name = Rsm.String(self._io, self, self._root)
+
         self.node_count = self._io.read_s4le()
         self.nodes = [None] * (self.node_count)
         for i in range(self.node_count):
             self.nodes[i] = Rsm.Node(self._io, self, self._root)
 
-        if self._root.version < 261:
-            self.pos_key_count = self._io.read_s4le()
+        if self._root.version < 262:
+            self.scale_key_count = self._io.read_s4le()
 
-        if self._root.version < 261:
-            self.pos_key_frames = [None] * (self.pos_key_count)
-            for i in range(self.pos_key_count):
-                self.pos_key_frames[i] = Rsm.PosKeyFrame(
+        if self._root.version < 262:
+            self.scale_key_frames = [None] * (self.scale_key_count)
+            for i in range(self.scale_key_count):
+                self.scale_key_frames[i] = Rsm.ScaleKeyFrame(
                     self._io, self, self._root)
 
-        self.volume_box_count = self._io.read_s4le()
-        self.volume_boxes = [None] * (self.volume_box_count)
-        for i in range(self.volume_box_count):
-            self.volume_boxes[i] = Rsm.VolumeBox(self._io, self, self._root)
+        if not (self._io.is_eof()):
+            self.volume_box_count = self._io.read_s4le()
+
+        if not (self._io.is_eof()):
+            self.volume_boxes = [None] * (self.volume_box_count)
+            for i in range(self.volume_box_count):
+                self.volume_boxes[i] = Rsm.VolumeBox(self._io, self,
+                                                     self._root)
 
     class TextureVertex(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
@@ -83,9 +108,12 @@ class Rsm(KaitaiStruct):
             self._read()
 
         def _read(self):
-            self.node_vertex_ids = [None] * (3)
+            if self._root.version >= 514:
+                self.length = self._io.read_s4le()
+
+            self.mesh_vertex_ids = [None] * (3)
             for i in range(3):
-                self.node_vertex_ids[i] = self._io.read_u2le()
+                self.mesh_vertex_ids[i] = self._io.read_u2le()
 
             self.texture_vertex_ids = [None] * (3)
             for i in range(3):
@@ -95,7 +123,13 @@ class Rsm(KaitaiStruct):
             self.padding = self._io.read_u2le()
             self.two_sides = self._io.read_s4le()
             if self._root.version >= 258:
-                self.smooth_group = self._io.read_s4le()
+                self.smooth_group_x = self._io.read_s4le()
+
+            if ((self._root.version >= 514) and (self.length > 24)):
+                self.smooth_group_y = self._io.read_s4le()
+
+            if ((self._root.version >= 514) and (self.length > 28)):
+                self.smooth_group_z = self._io.read_s4le()
 
     class PosKeyFrame(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
@@ -110,6 +144,8 @@ class Rsm(KaitaiStruct):
             for i in range(3):
                 self.position[i] = self._io.read_f4le()
 
+            self.data = self._io.read_s4le()
+
     class RotKeyFrame(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
             self._io = _io
@@ -122,6 +158,44 @@ class Rsm(KaitaiStruct):
             self.quaternion = [None] * (4)
             for i in range(4):
                 self.quaternion[i] = self._io.read_f4le()
+
+    class TexAnimation(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            self.type = self._io.read_s4le()
+            self.tex_frame_count = self._io.read_s4le()
+            self.tex_key_frames = [None] * (self.tex_frame_count)
+            for i in range(self.tex_frame_count):
+                self.tex_key_frames[i] = Rsm.TextureKeyFrame(
+                    self._io, self, self._root)
+
+    class TextureKeyFrame(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            self.frame_id = self._io.read_s4le()
+            self.offset = self._io.read_f4le()
+
+    class MeshVertex(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            self.position = [None] * (3)
+            for i in range(3):
+                self.position[i] = self._io.read_f4le()
 
     class NodeInfo(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
@@ -139,18 +213,37 @@ class Rsm(KaitaiStruct):
             for i in range(3):
                 self.offset_vector[i] = self._io.read_f4le()
 
-            self.position = [None] * (3)
-            for i in range(3):
-                self.position[i] = self._io.read_f4le()
+            if self._root.version < 514:
+                self.position = [None] * (3)
+                for i in range(3):
+                    self.position[i] = self._io.read_f4le()
 
-            self.rotation_angle = self._io.read_f4le()
-            self.rotation_axis = [None] * (3)
-            for i in range(3):
-                self.rotation_axis[i] = self._io.read_f4le()
+            if self._root.version < 514:
+                self.rotation_angle = self._io.read_f4le()
 
-            self.scale = [None] * (3)
-            for i in range(3):
-                self.scale[i] = self._io.read_f4le()
+            if self._root.version < 514:
+                self.rotation_axis = [None] * (3)
+                for i in range(3):
+                    self.rotation_axis[i] = self._io.read_f4le()
+
+            if self._root.version < 514:
+                self.scale = [None] * (3)
+                for i in range(3):
+                    self.scale[i] = self._io.read_f4le()
+
+    class String(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            if self._root.version > 512:
+                self.len = self._io.read_s4le()
+
+            self.value = self._io.read_bytes(
+                (self.len if self._root.version > 512 else 40))
 
     class VolumeBox(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
@@ -175,18 +268,6 @@ class Rsm(KaitaiStruct):
             if self._root.version >= 259:
                 self.flag = self._io.read_s4le()
 
-    class NodeVertex(KaitaiStruct):
-        def __init__(self, _io, _parent=None, _root=None):
-            self._io = _io
-            self._parent = _parent
-            self._root = _root if _root else self
-            self._read()
-
-        def _read(self):
-            self.position = [None] * (3)
-            for i in range(3):
-                self.position[i] = self._io.read_f4le()
-
     class Node(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
             self._io = _io
@@ -195,18 +276,25 @@ class Rsm(KaitaiStruct):
             self._read()
 
         def _read(self):
-            self.name = self._io.read_bytes(40)
-            self.parent_name = self._io.read_bytes(40)
+            self.name = Rsm.String(self._io, self, self._root)
+            self.parent_name = Rsm.String(self._io, self, self._root)
             self.texture_count = self._io.read_s4le()
-            self.texture_ids = [None] * (self.texture_count)
-            for i in range(self.texture_count):
-                self.texture_ids[i] = self._io.read_s4le()
+            if self._root.version >= 515:
+                self.texture_names = [None] * (self.texture_count)
+                for i in range(self.texture_count):
+                    self.texture_names[i] = Rsm.String(self._io, self,
+                                                       self._root)
+
+            if self._root.version < 515:
+                self.texture_ids = [None] * (self.texture_count)
+                for i in range(self.texture_count):
+                    self.texture_ids[i] = self._io.read_s4le()
 
             self.info = Rsm.NodeInfo(self._io, self, self._root)
-            self.node_vertex_count = self._io.read_s4le()
-            self.node_vertices = [None] * (self.node_vertex_count)
-            for i in range(self.node_vertex_count):
-                self.node_vertices[i] = Rsm.NodeVertex(self._io, self,
+            self.mesh_vertex_count = self._io.read_s4le()
+            self.mesh_vertices = [None] * (self.mesh_vertex_count)
+            for i in range(self.mesh_vertex_count):
+                self.mesh_vertices[i] = Rsm.MeshVertex(self._io, self,
                                                        self._root)
 
             self.texture_vertex_count = self._io.read_s4le()
@@ -216,21 +304,69 @@ class Rsm(KaitaiStruct):
                     self._io, self, self._root)
 
             self.face_count = self._io.read_s4le()
-            self.faces_info = [None] * (self.face_count)
+            self.faces = [None] * (self.face_count)
             for i in range(self.face_count):
-                self.faces_info[i] = Rsm.FaceInfo(self._io, self, self._root)
+                self.faces[i] = Rsm.FaceInfo(self._io, self, self._root)
 
-            if self._root.version >= 261:
-                self.pos_key_count = self._io.read_s4le()
+            if self._root.version >= 262:
+                self.scale_key_count = self._io.read_s4le()
 
-            if self._root.version >= 261:
-                self.pos_key_frames = [None] * (self.pos_key_count)
-                for i in range(self.pos_key_count):
-                    self.pos_key_frames[i] = Rsm.PosKeyFrame(
+            if self._root.version >= 262:
+                self.scale_key_frames = [None] * (self.scale_key_count)
+                for i in range(self.scale_key_count):
+                    self.scale_key_frames[i] = Rsm.ScaleKeyFrame(
                         self._io, self, self._root)
 
             self.rot_key_count = self._io.read_s4le()
             self.rot_key_frames = [None] * (self.rot_key_count)
             for i in range(self.rot_key_count):
                 self.rot_key_frames[i] = Rsm.RotKeyFrame(
+                    self._io, self, self._root)
+
+            if self._root.version >= 514:
+                self.pos_key_count = self._io.read_s4le()
+
+            if self._root.version >= 514:
+                self.pos_key_frames = [None] * (self.pos_key_count)
+                for i in range(self.pos_key_count):
+                    self.pos_key_frames[i] = Rsm.PosKeyFrame(
+                        self._io, self, self._root)
+
+            if self._root.version >= 515:
+                self.animated_texture_count = self._io.read_s4le()
+
+            if self._root.version >= 515:
+                self.animated_textures = [None] * (self.animated_texture_count)
+                for i in range(self.animated_texture_count):
+                    self.animated_textures[i] = Rsm.AnimatedTexture(
+                        self._io, self, self._root)
+
+    class ScaleKeyFrame(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            self.frame_id = self._io.read_s4le()
+            self.scale = [None] * (3)
+            for i in range(3):
+                self.scale[i] = self._io.read_f4le()
+
+            self.data = self._io.read_f4le()
+
+    class AnimatedTexture(KaitaiStruct):
+        def __init__(self, _io, _parent=None, _root=None):
+            self._io = _io
+            self._parent = _parent
+            self._root = _root if _root else self
+            self._read()
+
+        def _read(self):
+            self.texture_id = self._io.read_s4le()
+            self.animation_count = self._io.read_s4le()
+            self.tex_animations = [None] * (self.animation_count)
+            for i in range(self.animation_count):
+                self.tex_animations[i] = Rsm.TexAnimation(
                     self._io, self, self._root)
