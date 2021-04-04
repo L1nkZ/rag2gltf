@@ -212,10 +212,16 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
             tex_byteoffset += tex_bytelen
 
         gltf_meshes.append(Mesh(primitives=gltf_primitives))
+
+        # No need to specify identity matrices
+        identity = glm.mat4()
+        if node.gltf_transform_matrix == identity:
+            gltf_matrix = None
+        else:
+            gltf_matrix = sum(node.gltf_transform_matrix.to_list(), [])
+
         gltf_nodes.append(
-            Node(name=node_name,
-                 mesh=node_id,
-                 matrix=sum(node.gltf_transform_matrix.to_list(), [])))
+            Node(name=node_name, mesh=node_id, matrix=gltf_matrix))
         if node.parent is None:
             gltf_root_nodes.append(node_id)
 
@@ -233,8 +239,7 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
 
     # Update nodes' children
     for gltf_node in gltf_nodes:
-        children = nodes_children.get(gltf_node.name)
-        gltf_node.children = [] if children is None else children
+        gltf_node.children = nodes_children.get(gltf_node.name)
 
     return (gltf_resources, gltf_buffers, gltf_buffer_views, gltf_accessors,
             gltf_meshes, gltf_nodes, gltf_root_nodes)
