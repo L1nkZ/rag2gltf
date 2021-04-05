@@ -1,4 +1,5 @@
 import copy
+import struct
 from typing import List, Tuple, Optional
 
 import glm  # type: ignore
@@ -93,7 +94,7 @@ def decompose_matrix(
     rot_mat[2][1] *= inv_sz
     rot_mat[2][2] *= inv_sz
     rot_mat[3] = glm.vec4(0.0, 0.0, 0.0, 1.0)
-    rotation = glm.quat_cast(rot_mat)
+    rotation = glm.normalize(glm.quat_cast(rot_mat))
 
     if translation == glm.vec3():
         translation = None
@@ -103,3 +104,10 @@ def decompose_matrix(
         scale = None
 
     return (translation, rotation, scale)
+
+
+def serialize_array_of_floats(array: List[float]) -> bytearray:
+    output = bytearray()
+    for value in array:
+        output.extend(struct.pack('f', value))
+    return output

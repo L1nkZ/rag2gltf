@@ -9,15 +9,16 @@ import glm  # type: ignore
 from gltflib import (  # type: ignore
     GLTF, GLTFModel, Asset, Scene, Node, Mesh, Primitive, Attributes, Buffer,
     BufferView, Accessor, AccessorType, BufferTarget, ComponentType,
-    GLBResource, FileResource, Image, Sampler, Texture, Material,
-    PBRMetallicRoughness, TextureInfo)
+    FileResource, Image, Sampler, Texture, Material, PBRMetallicRoughness,
+    TextureInfo, Animation, AnimationSampler, Channel, Target)
 from kaitaistruct import KaitaiStream  # type: ignore
 
 from bounding_box import calculate_model_bounding_box, BoundingBox
 from image_conversion import convert_bmp_to_png, convert_tga_to_png
 from node import Node as AbstractNode, extract_nodes
 from parsing.rsm import Rsm
-from utils import mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix
+from utils import (mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix,
+                   serialize_array_of_floats)
 
 
 def convert_rsm(rsm_file: str,
@@ -35,7 +36,7 @@ def convert_rsm(rsm_file: str,
                                                    tex_id_by_node)
     gltf_resources += resources
 
-    model = GLTFModel(
+    gltf_model = GLTFModel(
         asset=Asset(version='2.0', generator="rag2gltf"),
         scenes=[Scene(nodes=gltf_root_nodes)],
         nodes=gltf_nodes,
@@ -55,7 +56,16 @@ def convert_rsm(rsm_file: str,
         textures=gltf_textures,
         materials=gltf_materials)
 
-    gltf = GLTF(model=model, resources=gltf_resources)
+    # Convert animations
+    if rsm_obj.version >= 0x202:
+        fps = rsm_obj.frame_rate_per_second
+    else:
+        fps = None
+
+    resources = _convert_animations(rsm_obj.version, fps, nodes, gltf_model)
+    gltf_resources += resources
+
+    gltf = GLTF(model=gltf_model, resources=gltf_resources)
     if glb:
         gltf.export(rsm_file_path.with_suffix(".glb").name)
     else:
@@ -357,9 +367,8 @@ def _generate_nodeview_matrix1(rsm_version: int, node: AbstractNode,
     else:
         # Animated model
         key_frame = rsm_node.rot_key_frames[0]
-        quaternion = glm.normalize(
-            glm.quat(key_frame.quaternion[3], key_frame.quaternion[0],
-                     key_frame.quaternion[1], key_frame.quaternion[2]))
+        quaternion = glm.quat(key_frame.quaternion[3], key_frame.quaternion[0],
+                              key_frame.quaternion[1], key_frame.quaternion[2])
         nodeview_matrix *= glm.mat4_cast(quaternion)
 
     # Scaling
@@ -436,3 +445,161 @@ def _generate_nodeview_matrix2(
         final_transform_matrix[3] += glm.vec4(parent_translation, 0.0)
 
     return (local_transform_matrix, final_transform_matrix)
+
+
+def _convert_animations(rsm_version: int,
+                        frame_rate_per_second: typing.Optional[float],
+                        nodes: typing.List[AbstractNode],
+                        gltf_model: GLTFModel) -> typing.List[FileResource]:
+    gltf_model.animations = []
+    gltf_resources = []
+
+    if frame_rate_per_second:
+        delay_between_frames = 1.0 / frame_rate_per_second
+    else:
+        delay_between_frames = 1.0 / 1000.0
+
+    model_anim = Animation(name="animation", samplers=[], channels=[])
+    for node_id, node in enumerate(nodes):
+        rsm_node = node.impl
+        node_name = decode_string(rsm_node.name)
+
+        # Rotation
+        rotation_frame_count = len(rsm_node.rot_key_frames)
+        if rotation_frame_count > 0:
+            input_values = [
+                delay_between_frames * rot_frame.frame_id
+                for rot_frame in rsm_node.rot_key_frames
+            ]
+
+            input_array = serialize_array_of_floats(input_values)
+            output_array = bytearray()
+            for frame in rsm_node.rot_key_frames:
+                if rsm_version < 0x200:
+                    gltf_quat = [
+                        frame.quaternion[0],
+                        frame.quaternion[2],
+                        frame.quaternion[1],
+                        frame.quaternion[3],
+                    ]
+                else:
+                    gltf_quat = frame.quaternion
+                for value in gltf_quat:
+                    output_array.extend(struct.pack('f', value))
+
+            input_values_file_name = f'{node_id}{node_name}_rotation_in.bin'
+            output_values_file_name = f'{node_id}{node_name}_rotation_out.bin'
+            gltf_resources += [
+                FileResource(input_values_file_name, data=input_array),
+                FileResource(output_values_file_name, data=output_array)
+            ]
+
+            curr_buffer_id = len(gltf_model.buffers)
+            gltf_model.buffers += [
+                Buffer(byteLength=len(input_array),
+                       uri=input_values_file_name),
+                Buffer(byteLength=len(output_array),
+                       uri=output_values_file_name)
+            ]
+            curr_buffer_view_id = len(gltf_model.bufferViews)
+            gltf_model.bufferViews += [
+                BufferView(buffer=curr_buffer_id,
+                           byteOffset=0,
+                           byteLength=len(input_array)),
+                BufferView(buffer=curr_buffer_id + 1,
+                           byteOffset=0,
+                           byteLength=len(output_array))
+            ]
+            curr_accessor_id = len(gltf_model.accessors)
+            gltf_model.accessors += [
+                Accessor(bufferView=curr_buffer_view_id,
+                         byteOffset=0,
+                         componentType=ComponentType.FLOAT.value,
+                         count=rotation_frame_count,
+                         type=AccessorType.SCALAR.value,
+                         min=[0.0],
+                         max=[max(input_values)]),
+                Accessor(bufferView=curr_buffer_view_id + 1,
+                         byteOffset=0,
+                         componentType=ComponentType.FLOAT.value,
+                         count=rotation_frame_count,
+                         type=AccessorType.VEC4.value)
+            ]
+
+            rot_sampler = AnimationSampler(input=curr_accessor_id,
+                                           output=curr_accessor_id + 1)
+            sampler_id = len(model_anim.samplers)
+            rot_channel = Channel(sampler=sampler_id,
+                                  target=Target(path="rotation", node=node_id))
+
+            model_anim.samplers.append(rot_sampler)
+            model_anim.channels.append(rot_channel)
+
+        # Translation
+        if rsm_version >= 0x203:
+            translation_frame_count = len(rsm_node.pos_key_frames)
+            if translation_frame_count > 0:
+                input_values = [
+                    delay_between_frames * pos_frame.frame_id
+                    for pos_frame in rsm_node.pos_key_frames
+                ]
+
+                input_array = serialize_array_of_floats(input_values)
+                output_array = bytearray()
+                for frame in rsm_node.pos_key_frames:
+                    for value in frame.position:
+                        output_array.extend(struct.pack('f', value))
+
+                input_values_file_name = f'{node_id}{node_name}_translation_in.bin'
+                output_values_file_name = f'{node_id}{node_name}_translation_out.bin'
+                gltf_resources += [
+                    FileResource(input_values_file_name, data=input_array),
+                    FileResource(output_values_file_name, data=output_array)
+                ]
+
+                curr_buffer_id = len(gltf_model.buffers)
+                gltf_model.buffers += [
+                    Buffer(byteLength=len(input_array),
+                           uri=input_values_file_name),
+                    Buffer(byteLength=len(output_array),
+                           uri=output_values_file_name)
+                ]
+                curr_buffer_view_id = len(gltf_model.bufferViews)
+                gltf_model.bufferViews += [
+                    BufferView(buffer=curr_buffer_id,
+                               byteOffset=0,
+                               byteLength=len(input_array)),
+                    BufferView(buffer=curr_buffer_id + 1,
+                               byteOffset=0,
+                               byteLength=len(output_array))
+                ]
+                curr_accessor_id = len(gltf_model.accessors)
+                gltf_model.accessors += [
+                    Accessor(bufferView=curr_buffer_view_id,
+                             byteOffset=0,
+                             componentType=ComponentType.FLOAT.value,
+                             count=translation_frame_count,
+                             type=AccessorType.SCALAR.value,
+                             min=[0.0],
+                             max=[max(input_values)]),
+                    Accessor(bufferView=curr_buffer_view_id + 1,
+                             byteOffset=0,
+                             componentType=ComponentType.FLOAT.value,
+                             count=translation_frame_count,
+                             type=AccessorType.VEC3.value)
+                ]
+
+                pos_sampler = AnimationSampler(input=curr_accessor_id,
+                                               output=curr_accessor_id + 1)
+                sampler_id = len(model_anim.samplers)
+                pos_channel = Channel(sampler=sampler_id,
+                                      target=Target(path="translation",
+                                                    node=node_id))
+
+                model_anim.samplers.append(pos_sampler)
+                model_anim.channels.append(pos_channel)
+
+    if len(model_anim.samplers) > 0:
+        gltf_model.animations.append(model_anim)
+
+    return gltf_resources
