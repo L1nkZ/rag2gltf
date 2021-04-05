@@ -1,8 +1,17 @@
-from typing import List
+import copy
+from typing import List, Tuple, Optional
 
 import glm  # type: ignore
 
 from parsing.rsm import Rsm
+
+
+def decode_string(string: Rsm.String) -> str:
+    return _decode_zstr(string.value)
+
+
+def _decode_zstr(zstr: bytes) -> str:
+    return zstr.split(b"\0")[0].decode("cp1252")
 
 
 def mat3tomat4(mat3: List[float]) -> glm.mat4:
@@ -57,9 +66,40 @@ def rag_mat4_mul(mat1: glm.mat4, mat2: glm.mat4) -> glm.mat4:
         matrix1[14] * matrix2[11] + matrix1[15] * matrix2[15])
 
 
-def decode_string(string: Rsm.String) -> str:
-    return _decode_zstr(string.value)
+def decompose_matrix(
+    mat: glm.mat4
+) -> Tuple[Optional[glm.vec3], Optional[glm.quat], Optional[glm.vec3]]:
+    sx = glm.length(glm.vec3(mat[0]))
+    sy = glm.length(glm.vec3(mat[1]))
+    sz = glm.length(glm.vec3(mat[2]))
+    if glm.determinant(mat) < 0.0:
+        sx = -sx
 
+    translation = glm.vec3(mat[3])
+    scale = glm.vec3(sx, sy, sz)
 
-def _decode_zstr(zstr: bytes) -> str:
-    return zstr.split(b"\0")[0].decode("cp1252")
+    inv_sx = 1.0 / sx
+    inv_sy = 1.0 / sy
+    inv_sz = 1.0 / sz
+
+    rot_mat = copy.copy(mat)
+    rot_mat[0][0] *= inv_sx
+    rot_mat[0][1] *= inv_sx
+    rot_mat[0][2] *= inv_sx
+    rot_mat[1][0] *= inv_sy
+    rot_mat[1][1] *= inv_sy
+    rot_mat[1][2] *= inv_sy
+    rot_mat[2][0] *= inv_sz
+    rot_mat[2][1] *= inv_sz
+    rot_mat[2][2] *= inv_sz
+    rot_mat[3] = glm.vec4(0.0, 0.0, 0.0, 1.0)
+    rotation = glm.quat_cast(rot_mat)
+
+    if translation == glm.vec3():
+        translation = None
+    if rotation == glm.quat():
+        rotation = None
+    if scale == glm.vec3():
+        scale = None
+
+    return (translation, rotation, scale)

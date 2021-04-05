@@ -17,7 +17,7 @@ from bounding_box import calculate_model_bounding_box, BoundingBox
 from image_conversion import convert_bmp_to_png, convert_tga_to_png
 from node import Node as AbstractNode, extract_nodes
 from parsing.rsm import Rsm
-from utils import mat3tomat4, decode_string, rag_mat4_mul
+from utils import mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix
 
 
 def convert_rsm(rsm_file: str,
@@ -213,15 +213,16 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
 
         gltf_meshes.append(Mesh(primitives=gltf_primitives))
 
-        # No need to specify identity matrices
-        identity = glm.mat4()
-        if node.gltf_transform_matrix == identity:
-            gltf_matrix = None
-        else:
-            gltf_matrix = sum(node.gltf_transform_matrix.to_list(), [])
+        # Decompose matrix to TRS
+        translation, rotation, scale = decompose_matrix(
+            node.gltf_transform_matrix)
 
         gltf_nodes.append(
-            Node(name=node_name, mesh=node_id, matrix=gltf_matrix))
+            Node(name=node_name,
+                 mesh=node_id,
+                 translation=translation.to_list() if translation else None,
+                 rotation=rotation.to_list() if rotation else None,
+                 scale=scale.to_list() if scale else None))
         if node.parent is None:
             gltf_root_nodes.append(node_id)
 
