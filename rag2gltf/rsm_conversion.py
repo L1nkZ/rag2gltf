@@ -535,6 +535,70 @@ def _convert_animations(rsm_version: int,
             model_anim.samplers.append(rot_sampler)
             model_anim.channels.append(rot_channel)
 
+        # Scale
+        if rsm_version >= 0x106:
+            scale_frame_count = len(rsm_node.scale_key_frames)
+            if scale_frame_count > 0:
+                input_values = [
+                    delay_between_frames * scale_frame.frame_id
+                    for scale_frame in rsm_node.scale_key_frames
+                ]
+
+                input_array = serialize_array_of_floats(input_values)
+                output_array = bytearray()
+                for frame in rsm_node.scale_key_frames:
+                    for value in frame.scale:
+                        output_array.extend(struct.pack('f', value))
+
+                input_values_file_name = f'{node_id}{node_name}_scale_in.bin'
+                output_values_file_name = f'{node_id}{node_name}_scale_out.bin'
+                gltf_resources += [
+                    FileResource(input_values_file_name, data=input_array),
+                    FileResource(output_values_file_name, data=output_array)
+                ]
+
+                curr_buffer_id = len(gltf_model.buffers)
+                gltf_model.buffers += [
+                    Buffer(byteLength=len(input_array),
+                           uri=input_values_file_name),
+                    Buffer(byteLength=len(output_array),
+                           uri=output_values_file_name)
+                ]
+                curr_buffer_view_id = len(gltf_model.bufferViews)
+                gltf_model.bufferViews += [
+                    BufferView(buffer=curr_buffer_id,
+                               byteOffset=0,
+                               byteLength=len(input_array)),
+                    BufferView(buffer=curr_buffer_id + 1,
+                               byteOffset=0,
+                               byteLength=len(output_array))
+                ]
+                curr_accessor_id = len(gltf_model.accessors)
+                gltf_model.accessors += [
+                    Accessor(bufferView=curr_buffer_view_id,
+                             byteOffset=0,
+                             componentType=ComponentType.FLOAT.value,
+                             count=scale_frame_count,
+                             type=AccessorType.SCALAR.value,
+                             min=[0.0],
+                             max=[max(input_values)]),
+                    Accessor(bufferView=curr_buffer_view_id + 1,
+                             byteOffset=0,
+                             componentType=ComponentType.FLOAT.value,
+                             count=scale_frame_count,
+                             type=AccessorType.VEC3.value)
+                ]
+
+                scale_sampler = AnimationSampler(input=curr_accessor_id,
+                                                 output=curr_accessor_id + 1)
+                sampler_id = len(model_anim.samplers)
+                scale_channel = Channel(sampler=sampler_id,
+                                        target=Target(path="scale",
+                                                      node=node_id))
+
+                model_anim.samplers.append(scale_sampler)
+                model_anim.channels.append(scale_channel)
+
         # Translation
         if rsm_version >= 0x203:
             translation_frame_count = len(rsm_node.pos_key_frames)
