@@ -1,0 +1,43 @@
+environment:
+  global:
+    PROJECT_NAME: rag2gltf
+  matrix:
+    - PYTHON: "C:\\Python37-x64"
+      TARGET: x86_64-windows
+
+install:
+  - "SET PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
+  - python -m pip install -r requirements.txt
+  - python -m pip install pyinstaller
+  - choco install upx
+
+build_script:
+  - pyinstaller -F rag2gltf/__main__.py
+
+before_deploy:
+  - pyinstaller -F rag2gltf/__main__.py
+  - mkdir staging
+  - copy dist\__main__.exe staging\rag2gltf.exe
+  - copy README.md staging
+  - copy LICENSE staging
+  - cd staging
+    # release zipfile will look like 'rag2gltf-v1.2.3-x86_64-windows'
+  - 7z a ../%PROJECT_NAME%-%APPVEYOR_REPO_TAG_NAME%-%TARGET%.zip *
+  - appveyor PushArtifact ../%PROJECT_NAME%-%APPVEYOR_REPO_TAG_NAME%-%TARGET%.zip
+
+
+deploy:
+  description: 'Windows release'
+  # All the zipped artifacts will be deployed
+  artifact: /.*\.zip/
+  # Here's how:
+  # - Go to 'https://github.com/settings/tokens/new' and generate a Token with only the
+  # `public_repo` scope enabled
+  # - Then go to 'https://ci.appveyor.com/tools/encrypt' and enter the newly generated token.
+  # - Enter the "encrypted value" below
+  auth_token:
+    secure: HbmvGi00TAB0eOqRuNADiVERfxDUEol84IufEOPX17ah84rJC9SgL34WvbQUF18k
+  provider: GitHub
+  # deploy when a new tag is pushed and only on the stable channel
+  on:
+    appveyor_repo_tag: true
