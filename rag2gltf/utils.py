@@ -1,4 +1,5 @@
 import copy
+import io
 import struct
 from typing import List, Tuple, Optional
 
@@ -106,8 +107,8 @@ def decompose_matrix(
     return (translation, rotation, scale)
 
 
-def serialize_array_of_floats(array: List[float]) -> bytearray:
-    output = bytearray()
+def serialize_floats(array: List[float], stream: io.BytesIO) -> int:
+    written = 0
     for value in array:
-        output.extend(struct.pack('f', value))
-    return output
+        written += stream.write(struct.pack('f', value))
+    return written

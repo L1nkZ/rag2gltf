@@ -18,7 +18,7 @@ from image_conversion import convert_bmp_to_png, convert_tga_to_png
 from node import Node as AbstractNode, extract_nodes
 from parsing.rsm import Rsm
 from utils import (mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix,
-                   serialize_array_of_floats)
+                   serialize_floats)
 
 
 def convert_rsm(rsm_file: str,
@@ -460,6 +460,15 @@ def _convert_animations(rsm_version: int,
         delay_between_frames = 1.0 / 1000.0
 
     model_anim = Animation(name="animation", samplers=[], channels=[])
+    input_buffer_id = None
+    input_stream = io.BytesIO()
+    rot_buffer_id = None
+    rot_output_stream = io.BytesIO()
+    scale_buffer_id = None
+    scale_output_stream = io.BytesIO()
+    pos_buffer_id = None
+    pos_output_stream = io.BytesIO()
+
     for node_id, node in enumerate(nodes):
         rsm_node = node.impl
         node_name = decode_string(rsm_node.name)
@@ -467,13 +476,22 @@ def _convert_animations(rsm_version: int,
         # Rotation
         rotation_frame_count = len(rsm_node.rot_key_frames)
         if rotation_frame_count > 0:
+            if input_buffer_id is None:
+                input_buffer_id = len(gltf_model.buffers)
+                gltf_model.buffers.append(Buffer(byteLength=0))
+            if rot_buffer_id is None:
+                rot_buffer_id = len(gltf_model.buffers)
+                gltf_model.buffers.append(Buffer(byteLength=0))
+
             input_values = [
                 delay_between_frames * rot_frame.frame_id
                 for rot_frame in rsm_node.rot_key_frames
             ]
 
-            input_array = serialize_array_of_floats(input_values)
-            output_array = bytearray()
+            input_view_offset = input_stream.tell()
+            input_written = serialize_floats(input_values, input_stream)
+            output_view_offset = rot_output_stream.tell()
+            output_written = 0
             for frame in rsm_node.rot_key_frames:
                 if rsm_version < 0x200:
                     gltf_quat = [
@@ -485,30 +503,17 @@ def _convert_animations(rsm_version: int,
                 else:
                     gltf_quat = frame.quaternion
                 for value in gltf_quat:
-                    output_array.extend(struct.pack('f', value))
+                    output_written += rot_output_stream.write(
+                        struct.pack('f', value))
 
-            input_values_file_name = f'{node_id}{node_name}_rotation_in.bin'
-            output_values_file_name = f'{node_id}{node_name}_rotation_out.bin'
-            gltf_resources += [
-                FileResource(input_values_file_name, data=input_array),
-                FileResource(output_values_file_name, data=output_array)
-            ]
-
-            curr_buffer_id = len(gltf_model.buffers)
-            gltf_model.buffers += [
-                Buffer(byteLength=len(input_array),
-                       uri=input_values_file_name),
-                Buffer(byteLength=len(output_array),
-                       uri=output_values_file_name)
-            ]
             curr_buffer_view_id = len(gltf_model.bufferViews)
             gltf_model.bufferViews += [
-                BufferView(buffer=curr_buffer_id,
-                           byteOffset=0,
-                           byteLength=len(input_array)),
-                BufferView(buffer=curr_buffer_id + 1,
-                           byteOffset=0,
-                           byteLength=len(output_array))
+                BufferView(buffer=input_buffer_id,
+                           byteOffset=input_view_offset,
+                           byteLength=input_written),
+                BufferView(buffer=rot_buffer_id,
+                           byteOffset=output_view_offset,
+                           byteLength=output_written)
             ]
             curr_accessor_id = len(gltf_model.accessors)
             gltf_model.accessors += [
@@ -539,39 +544,35 @@ def _convert_animations(rsm_version: int,
         if rsm_version >= 0x106:
             scale_frame_count = len(rsm_node.scale_key_frames)
             if scale_frame_count > 0:
+                if input_buffer_id is None:
+                    input_buffer_id = len(gltf_model.buffers)
+                    gltf_model.buffers.append(Buffer(byteLength=0))
+                if scale_buffer_id is None:
+                    scale_buffer_id = len(gltf_model.buffers)
+                    gltf_model.buffers.append(Buffer(byteLength=0))
+
                 input_values = [
                     delay_between_frames * scale_frame.frame_id
                     for scale_frame in rsm_node.scale_key_frames
                 ]
 
-                input_array = serialize_array_of_floats(input_values)
-                output_array = bytearray()
+                input_view_offset = input_stream.tell()
+                input_written = serialize_floats(input_values, input_stream)
+                output_view_offset = scale_output_stream.tell()
+                output_written = 0
                 for frame in rsm_node.scale_key_frames:
                     for value in frame.scale:
-                        output_array.extend(struct.pack('f', value))
+                        output_written += scale_output_stream.write(
+                            struct.pack('f', value))
 
-                input_values_file_name = f'{node_id}{node_name}_scale_in.bin'
-                output_values_file_name = f'{node_id}{node_name}_scale_out.bin'
-                gltf_resources += [
-                    FileResource(input_values_file_name, data=input_array),
-                    FileResource(output_values_file_name, data=output_array)
-                ]
-
-                curr_buffer_id = len(gltf_model.buffers)
-                gltf_model.buffers += [
-                    Buffer(byteLength=len(input_array),
-                           uri=input_values_file_name),
-                    Buffer(byteLength=len(output_array),
-                           uri=output_values_file_name)
-                ]
                 curr_buffer_view_id = len(gltf_model.bufferViews)
                 gltf_model.bufferViews += [
-                    BufferView(buffer=curr_buffer_id,
-                               byteOffset=0,
-                               byteLength=len(input_array)),
-                    BufferView(buffer=curr_buffer_id + 1,
-                               byteOffset=0,
-                               byteLength=len(output_array))
+                    BufferView(buffer=input_buffer_id,
+                               byteOffset=input_view_offset,
+                               byteLength=input_written),
+                    BufferView(buffer=scale_buffer_id,
+                               byteOffset=output_view_offset,
+                               byteLength=output_written)
                 ]
                 curr_accessor_id = len(gltf_model.accessors)
                 gltf_model.accessors += [
@@ -603,39 +604,35 @@ def _convert_animations(rsm_version: int,
         if rsm_version >= 0x203:
             translation_frame_count = len(rsm_node.pos_key_frames)
             if translation_frame_count > 0:
+                if input_buffer_id is None:
+                    input_buffer_id = len(gltf_model.buffers)
+                    gltf_model.buffers.append(Buffer(byteLength=0))
+                if pos_buffer_id is None:
+                    pos_buffer_id = len(gltf_model.buffers)
+                    gltf_model.buffers.append(Buffer(byteLength=0))
+
                 input_values = [
                     delay_between_frames * pos_frame.frame_id
                     for pos_frame in rsm_node.pos_key_frames
                 ]
 
-                input_array = serialize_array_of_floats(input_values)
-                output_array = bytearray()
+                input_view_offset = input_stream.tell()
+                input_written = serialize_floats(input_values, input_stream)
+                output_view_offset = pos_output_stream.tell()
+                output_written = 0
                 for frame in rsm_node.pos_key_frames:
                     for value in frame.position:
-                        output_array.extend(struct.pack('f', value))
+                        output_written += pos_output_stream.write(
+                            struct.pack('f', value))
 
-                input_values_file_name = f'{node_id}{node_name}_translation_in.bin'
-                output_values_file_name = f'{node_id}{node_name}_translation_out.bin'
-                gltf_resources += [
-                    FileResource(input_values_file_name, data=input_array),
-                    FileResource(output_values_file_name, data=output_array)
-                ]
-
-                curr_buffer_id = len(gltf_model.buffers)
-                gltf_model.buffers += [
-                    Buffer(byteLength=len(input_array),
-                           uri=input_values_file_name),
-                    Buffer(byteLength=len(output_array),
-                           uri=output_values_file_name)
-                ]
                 curr_buffer_view_id = len(gltf_model.bufferViews)
                 gltf_model.bufferViews += [
-                    BufferView(buffer=curr_buffer_id,
-                               byteOffset=0,
-                               byteLength=len(input_array)),
-                    BufferView(buffer=curr_buffer_id + 1,
-                               byteOffset=0,
-                               byteLength=len(output_array))
+                    BufferView(buffer=input_buffer_id,
+                               byteOffset=input_view_offset,
+                               byteLength=input_written),
+                    BufferView(buffer=pos_buffer_id,
+                               byteOffset=output_view_offset,
+                               byteLength=output_written)
                 ]
                 curr_accessor_id = len(gltf_model.accessors)
                 gltf_model.accessors += [
@@ -663,7 +660,43 @@ def _convert_animations(rsm_version: int,
                 model_anim.samplers.append(pos_sampler)
                 model_anim.channels.append(pos_channel)
 
-    if len(model_anim.samplers) > 0:
+    if input_buffer_id:
+        # Add input data
+        input_stream.seek(0)
+        input_data = input_stream.read()
+        input_file_name = "anim_in.bin"
+        gltf_resources.append(FileResource(input_file_name, data=input_data))
+        gltf_model.buffers[input_buffer_id].uri = input_file_name
+        gltf_model.buffers[input_buffer_id].byteLength = len(input_data)
+
+        # Add rotation data
+        if rot_buffer_id:
+            rot_output_stream.seek(0)
+            rot_data = rot_output_stream.read()
+            rot_file_name = 'anim_rot.bin'
+            gltf_resources.append(FileResource(rot_file_name, data=rot_data))
+            gltf_model.buffers[rot_buffer_id].uri = rot_file_name
+            gltf_model.buffers[rot_buffer_id].byteLength = len(rot_data)
+
+        # Add scale data
+        if scale_buffer_id:
+            scale_output_stream.seek(0)
+            scale_data = scale_output_stream.read()
+            scale_file_name = 'anim_scale.bin'
+            gltf_resources.append(
+                FileResource(scale_file_name, data=scale_data))
+            gltf_model.buffers[scale_buffer_id].uri = scale_file_name
+            gltf_model.buffers[scale_buffer_id].byteLength = len(scale_data)
+
+        # Add tanslation data
+        if pos_buffer_id:
+            pos_output_stream.seek(0)
+            pos_data = pos_output_stream.read()
+            pos_file_name = 'anim_pos.bin'
+            gltf_resources.append(FileResource(pos_file_name, data=pos_data))
+            gltf_model.buffers[pos_buffer_id].uri = pos_file_name
+            gltf_model.buffers[pos_buffer_id].byteLength = len(pos_data)
+
         gltf_model.animations.append(model_anim)
 
     return gltf_resources
