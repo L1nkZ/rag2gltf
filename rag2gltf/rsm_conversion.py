@@ -35,26 +35,8 @@ def convert_rsm(rsm_file: str,
     rsm_file_path = Path(rsm_file)
     rsm_obj = _parse_rsm_file(rsm_file_path)
 
-    _LOGGER.info("Converting textures ...")
-    (gltf_resources, gltf_images, gltf_textures, gltf_materials,
-     tex_id_by_node) = _convert_textures(rsm_obj, Path(data_folder))
-
-    _LOGGER.info("Converting 3D model ...")
-    nodes = extract_nodes(rsm_obj)
-    (resources, gltf_buffers, gltf_buffer_views, gltf_accessors, gltf_meshes,
-     gltf_nodes, gltf_root_nodes) = _convert_nodes(rsm_obj.version, nodes,
-                                                   tex_id_by_node)
-    gltf_resources += resources
-
     gltf_model = GLTFModel(
         asset=Asset(version='2.0', generator="rag2gltf"),
-        scenes=[Scene(nodes=gltf_root_nodes)],
-        nodes=gltf_nodes,
-        meshes=gltf_meshes,
-        buffers=gltf_buffers,
-        bufferViews=gltf_buffer_views,
-        accessors=gltf_accessors,
-        images=gltf_images,
         samplers=[
             Sampler(
                 magFilter=9729,  # LINEAR
@@ -63,8 +45,27 @@ def convert_rsm(rsm_file: str,
                 wrapT=33071  # CLAMP_TO_EDGE
             )
         ],
-        textures=gltf_textures,
-        materials=gltf_materials)
+        nodes=[],
+        meshes=[],
+        buffers=[],
+        bufferViews=[],
+        accessors=[],
+        images=[],
+        textures=[],
+        materials=[])
+
+    gltf_resources: typing.List[FileResource] = []
+    _LOGGER.info("Converting textures ...")
+    resources, tex_id_by_node = _convert_textures(rsm_obj, Path(data_folder),
+                                                  gltf_model)
+    gltf_resources += resources
+
+    _LOGGER.info("Converting 3D model ...")
+    nodes = extract_nodes(rsm_obj)
+    resources, root_nodes = _convert_nodes(rsm_obj.version, nodes,
+                                           tex_id_by_node, gltf_model)
+    gltf_model.scenes = [Scene(nodes=root_nodes)]
+    gltf_resources += resources
 
     # Convert animations
     if rsm_obj.version >= 0x202:
@@ -93,14 +94,8 @@ def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
 
 
 def _convert_textures(
-    rsm_obj: Rsm, data_folder_path: Path
-) -> typing.Tuple[typing.List[FileResource], typing.List[Image],
-                  typing.List[Texture], typing.List[Material], typing.Dict[
-                      str, list]]:
-    gltf_resources = []
-    gltf_images = []
-    gltf_textures = []
-    gltf_materials = []
+    rsm_obj: Rsm, data_folder_path: Path, gltf_model: GLTFModel
+) -> typing.Tuple[typing.List[FileResource], typing.Dict[str, list]]:
     tex_id_by_node: typing.Dict[str, list] = {}
 
     if rsm_obj.version >= 0x203:
@@ -127,14 +122,14 @@ def _convert_textures(
             map(lambda t: (t[0], decode_string(t[1])),
                 enumerate(texture_list)))
 
+    gltf_resources = []
     for material, texture, image, resource in result_list:
         gltf_resources.append(resource)
-        gltf_images.append(image)
-        gltf_textures.append(texture)
-        gltf_materials.append(material)
+        gltf_model.images.append(image)
+        gltf_model.textures.append(texture)
+        gltf_model.materials.append(material)
 
-    return (gltf_resources, gltf_images, gltf_textures, gltf_materials,
-            tex_id_by_node)
+    return gltf_resources, tex_id_by_node
 
 
 def _convert_texture(
@@ -168,12 +163,9 @@ def _convert_texture(
 
 
 def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
-                   tex_id_by_node: typing.Dict[str, list]):
-    gltf_buffer_views = []
-    gltf_accessors: typing.List[Accessor] = []
-    gltf_meshes = []
-    gltf_nodes: typing.List[Node] = []
-    gltf_root_nodes = []
+                   tex_id_by_node: typing.Dict[str,
+                                               list], gltf_model: GLTFModel):
+    root_nodes = []
 
     model_bbox = calculate_model_bounding_box(rsm_version, nodes)
     for node in nodes:
@@ -213,21 +205,21 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
             (mins, maxs) = _calculate_vertices_bounds(vertices[0])
             (tex_mins, tex_maxs) = _calculate_vertices_bounds(vertices[1])
 
-            gltf_buffer_views.append(
+            gltf_model.bufferViews.append(
                 BufferView(
                     buffer=0,  # Vertices
                     byteOffset=byteoffset,
                     byteLength=bytelen,
                     target=BufferTarget.ARRAY_BUFFER.value))
-            gltf_buffer_views.append(
+            gltf_model.bufferViews.append(
                 BufferView(
                     buffer=1,  # Texture vertices
                     byteOffset=tex_byteoffset,
                     byteLength=tex_bytelen,
                     target=BufferTarget.ARRAY_BUFFER.value))
 
-            buffer_view_id = len(gltf_accessors)
-            gltf_accessors.append(
+            buffer_view_id = len(gltf_model.accessors)
+            gltf_model.accessors.append(
                 Accessor(bufferView=buffer_view_id,
                          byteOffset=0,
                          componentType=ComponentType.FLOAT.value,
@@ -235,7 +227,7 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
                          type=AccessorType.VEC3.value,
                          min=mins,
                          max=maxs))
-            gltf_accessors.append(
+            gltf_model.accessors.append(
                 Accessor(bufferView=buffer_view_id + 1,
                          byteOffset=0,
                          componentType=ComponentType.FLOAT.value,
@@ -251,20 +243,20 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
             byteoffset += bytelen
             tex_byteoffset += tex_bytelen
 
-        gltf_meshes.append(Mesh(primitives=gltf_primitives))
+        gltf_model.meshes.append(Mesh(primitives=gltf_primitives))
 
         # Decompose matrix to TRS
         translation, rotation, scale = decompose_matrix(
             node.gltf_transform_matrix)
 
-        gltf_nodes.append(
+        gltf_model.nodes.append(
             Node(name=node_name,
                  mesh=node_id,
                  translation=translation.to_list() if translation else None,
                  rotation=rotation.to_list() if rotation else None,
                  scale=scale.to_list() if scale else None))
         if node.parent is None:
-            gltf_root_nodes.append(node_id)
+            root_nodes.append(node_id)
 
     # Register vertex buffers
     vtx_file_name = 'vertices.bin'
@@ -273,17 +265,16 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
         FileResource(vtx_file_name, data=vertex_bytearray),
         FileResource(tex_vtx_file_name, data=tex_vertex_bytearray)
     ]
-    gltf_buffers = [
+    gltf_model.buffers = [
         Buffer(byteLength=byteoffset, uri=vtx_file_name),
         Buffer(byteLength=tex_byteoffset, uri=tex_vtx_file_name)
     ]
 
     # Update nodes' children
-    for gltf_node in gltf_nodes:
+    for gltf_node in gltf_model.nodes:
         gltf_node.children = nodes_children.get(gltf_node.name)
 
-    return (gltf_resources, gltf_buffers, gltf_buffer_views, gltf_accessors,
-            gltf_meshes, gltf_nodes, gltf_root_nodes)
+    return gltf_resources, root_nodes
 
 
 def _sort_vertices_by_texture(
