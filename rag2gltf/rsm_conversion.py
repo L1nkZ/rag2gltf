@@ -30,6 +30,19 @@ _LOGGER = logging.getLogger("rag2gltf")
 def convert_rsm(rsm_file: str,
                 data_folder: str = "data",
                 glb: bool = False) -> None:
+    """
+    Converts an RSM file to glTF 2.0
+    Parameters
+    ----------
+    rsm_file : string
+        Path to the RSM file to convert
+
+    data_folder : string
+        Path to the data folder containing texture files
+
+    glb : boolean
+        Export as GLB (single binary file)
+    """
     logging.basicConfig(level=logging.INFO)
 
     _LOGGER.info(f"Converting RSM file '{rsm_file}'")
