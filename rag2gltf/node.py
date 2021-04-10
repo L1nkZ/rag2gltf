@@ -2,8 +2,8 @@ from typing import Optional, List
 
 import glm  # type: ignore
 
-from parsing.rsm import Rsm
-from utils import decode_string
+from .parsing.rsm import Rsm
+from .utils import decode_string
 
 
 class Node:

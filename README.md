@@ -12,7 +12,8 @@ Command-line utility to convert RSM1 and RSM2 models to glTF 2.0.
 $ git clone https://github.com/L1nkZ/rag2gltf.git
 $ cd rag2gtlf
 $ pip install -r requirements.txt
-$ python rag2gltf data/model/gld2/building.rsm --data_folder=data/
+$ pip install .
+$ rag2gltf data/model/gld2/building.rsm --data_folder=data/
 ```
 
 ## Limitations

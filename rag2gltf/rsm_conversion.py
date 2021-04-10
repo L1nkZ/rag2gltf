@@ -17,12 +17,12 @@ from gltflib import (  # type: ignore
     TextureInfo, Animation, AnimationSampler, Channel, Target)
 from kaitaistruct import KaitaiStream, ValidationNotEqualError  # type: ignore
 
-from bounding_box import calculate_model_bounding_box, BoundingBox
-from image_conversion import convert_bmp_to_png, convert_tga_to_png
-from node import Node as AbstractNode, extract_nodes
-from parsing.rsm import Rsm
-from utils import (mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix,
-                   serialize_floats)
+from .bounding_box import calculate_model_bounding_box, BoundingBox
+from .image_conversion import convert_bmp_to_png, convert_tga_to_png
+from .node import Node as AbstractNode, extract_nodes
+from .parsing.rsm import Rsm
+from .utils import (mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix,
+                    serialize_floats)
 
 _LOGGER = logging.getLogger("rag2gltf")
 

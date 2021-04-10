@@ -4,9 +4,9 @@ from typing import List
 
 import glm  # type: ignore
 
-from node import Node
-from parsing.rsm import Rsm
-from utils import mat3tomat4, decode_string
+from .node import Node
+from .parsing.rsm import Rsm
+from .utils import mat3tomat4, decode_string
 
 
 class BoundingBox:

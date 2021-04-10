@@ -5,7 +5,7 @@ from typing import List, Tuple, Optional
 
 import glm  # type: ignore
 
-from parsing.rsm import Rsm
+from .parsing.rsm import Rsm
 
 
 def decode_string(string: Rsm.String) -> str:

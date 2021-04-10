@@ -1,7 +1,6 @@
 #!/usr/bin/python3
-import fire  # type: ignore
 
-from rsm_conversion import convert_rsm
+from rag2gltf import main
 
 if __name__ == "__main__":
-    fire.Fire(convert_rsm)
+    main()
