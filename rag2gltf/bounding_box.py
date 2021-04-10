@@ -1,6 +1,6 @@
 import copy
 import math
-import typing
+from typing import List
 
 import glm  # type: ignore
 
@@ -20,7 +20,7 @@ class BoundingBox:
 
 
 def calculate_model_bounding_box(rsm_version: int,
-                                 nodes: typing.List[Node]) -> BoundingBox:
+                                 nodes: List[Node]) -> BoundingBox:
     if rsm_version >= 0x200:
         # TODO
         return BoundingBox()
@@ -41,8 +41,7 @@ def calculate_model_bounding_box(rsm_version: int,
     return bbox
 
 
-def _calculate_nodes_bounding_boxes(version: int,
-                                    nodes: typing.List[Node]) -> None:
+def _calculate_nodes_bounding_boxes(version: int, nodes: List[Node]) -> None:
     if len(nodes) == 0:
         return
 

@@ -4,9 +4,9 @@ import logging
 import math
 import multiprocessing as mp
 import struct
-import typing
 from functools import partial
 from pathlib import Path, PureWindowsPath
+from typing import List, Dict, Union, Tuple, Optional, BinaryIO
 
 import glm  # type: ignore
 from gltflib import (  # type: ignore
@@ -54,7 +54,7 @@ def convert_rsm(rsm_file: str,
         textures=[],
         materials=[])
 
-    gltf_resources: typing.List[FileResource] = []
+    gltf_resources: List[FileResource] = []
     _LOGGER.info("Converting textures ...")
     resources, tex_id_by_node = _convert_textures(rsm_obj, Path(data_folder),
                                                   gltf_model)
@@ -94,12 +94,12 @@ def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
 
 
 def _convert_textures(
-    rsm_obj: Rsm, data_folder_path: Path, gltf_model: GLTFModel
-) -> typing.Tuple[typing.List[FileResource], typing.Dict[str, list]]:
-    tex_id_by_node: typing.Dict[str, list] = {}
+        rsm_obj: Rsm, data_folder_path: Path,
+        gltf_model: GLTFModel) -> Tuple[List[FileResource], Dict[str, list]]:
+    tex_id_by_node: Dict[str, list] = {}
 
     if rsm_obj.version >= 0x203:
-        texture_list: typing.List[Rsm.String] = []
+        texture_list: List[Rsm.String] = []
         for node in rsm_obj.nodes:
             node_name = decode_string(node.name)
             tex_id_by_node[node_name] = []
@@ -133,13 +133,13 @@ def _convert_textures(
 
 
 def _convert_texture(
-    tex_info: typing.Tuple[int, str], data_folder_path: Path
-) -> typing.Tuple[Material, Texture, Image, FileResource]:
+        tex_info: Tuple[int, str], data_folder_path: Path
+) -> Tuple[Material, Texture, Image, FileResource]:
     tex_id, texture_name = tex_info
     texture_path = PureWindowsPath(texture_name)
     full_texture_path = data_folder_path / "texture" / texture_path
 
-    texture_data: typing.Union[io.BytesIO, typing.BinaryIO]
+    texture_data: Union[io.BytesIO, BinaryIO]
     alpha_mode = "MASK"
     if texture_path.suffix.lower() == ".bmp":
         texture_data = convert_bmp_to_png(full_texture_path)
@@ -162,9 +162,10 @@ def _convert_texture(
             FileResource(dest_path.name, data=texture_data.read()))
 
 
-def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
-                   tex_id_by_node: typing.Dict[str,
-                                               list], gltf_model: GLTFModel):
+def _convert_nodes(
+        rsm_version: int, nodes: List[AbstractNode],
+        tex_id_by_node: Dict[str, list],
+        gltf_model: GLTFModel) -> Tuple[List[FileResource], List[int]]:
     root_nodes = []
 
     model_bbox = calculate_model_bounding_box(rsm_version, nodes)
@@ -173,7 +174,7 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
             _compute_transform_matrices(rsm_version, node,
                                         len(nodes) == 0, model_bbox)
 
-    nodes_children: typing.Dict[str, typing.List[int]] = {}
+    nodes_children: Dict[str, List[int]] = {}
     vertex_bytearray = bytearray()
     tex_vertex_bytearray = bytearray()
     byteoffset = 0
@@ -277,10 +278,9 @@ def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
     return gltf_resources, root_nodes
 
 
-def _sort_vertices_by_texture(
-        node: Rsm.Node,
-        node_tex_ids: typing.List[int]) -> typing.Dict[int, list]:
-    vertices_by_texture: typing.Dict[int, list] = {}
+def _sort_vertices_by_texture(node: Rsm.Node,
+                              node_tex_ids: List[int]) -> Dict[int, list]:
+    vertices_by_texture: Dict[int, list] = {}
 
     for face_info in node.faces:
         v_ids = face_info.mesh_vertex_ids
@@ -302,8 +302,7 @@ def _sort_vertices_by_texture(
     return vertices_by_texture
 
 
-def _serialize_vertices(vertices: typing.List[typing.List[float]],
-                        array: bytearray) -> int:
+def _serialize_vertices(vertices: List[List[float]], array: bytearray) -> int:
     initial_size = len(array)
     for vertex in vertices:
         for value in vertex:
@@ -313,8 +312,7 @@ def _serialize_vertices(vertices: typing.List[typing.List[float]],
 
 
 def _calculate_vertices_bounds(
-    vertices: typing.List[typing.List[float]]
-) -> typing.Tuple[typing.List[float], typing.List[float]]:
+        vertices: List[List[float]]) -> Tuple[List[float], List[float]]:
     vertex_len = len(vertices[0])
     min_v = [
         min([vertex[i] for vertex in vertices]) for i in range(vertex_len)
@@ -407,8 +405,7 @@ def _generate_nodeview_matrix1(rsm_version: int, node: AbstractNode,
 
 
 def _generate_nodeview_matrix2(
-        rsm_version: int,
-        node: AbstractNode) -> typing.Tuple[glm.mat4, glm.mat4]:
+        rsm_version: int, node: AbstractNode) -> Tuple[glm.mat4, glm.mat4]:
     # Transformations which are inherited by children
     local_transform_matrix = glm.mat4()
     rsm_node = node.impl
@@ -469,9 +466,9 @@ def _generate_nodeview_matrix2(
 
 
 def _convert_animations(rsm_version: int,
-                        frame_rate_per_second: typing.Optional[float],
-                        nodes: typing.List[AbstractNode],
-                        gltf_model: GLTFModel) -> typing.List[FileResource]:
+                        frame_rate_per_second: Optional[float],
+                        nodes: List[AbstractNode],
+                        gltf_model: GLTFModel) -> List[FileResource]:
     gltf_resources = []
 
     if frame_rate_per_second:
