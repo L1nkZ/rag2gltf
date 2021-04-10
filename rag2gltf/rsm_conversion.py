@@ -1,5 +1,6 @@
 import copy
 import io
+import logging
 import math
 import struct
 import typing
@@ -20,16 +21,23 @@ from parsing.rsm import Rsm
 from utils import (mat3tomat4, decode_string, rag_mat4_mul, decompose_matrix,
                    serialize_floats)
 
+_LOGGER = logging.getLogger("rag2gltf")
+
 
 def convert_rsm(rsm_file: str,
                 data_folder: str = "data",
                 glb: bool = False) -> None:
+    logging.basicConfig(level=logging.INFO)
+
+    _LOGGER.info(f"Converting RSM file '{rsm_file}'")
     rsm_file_path = Path(rsm_file)
     rsm_obj = _parse_rsm_file(rsm_file_path)
 
+    _LOGGER.info("Converting textures ...")
     (gltf_resources, gltf_images, gltf_textures, gltf_materials,
      tex_id_by_node) = _convert_textures(rsm_obj, Path(data_folder))
 
+    _LOGGER.info("Converting 3D model ...")
     nodes = extract_nodes(rsm_obj)
     (resources, gltf_buffers, gltf_buffer_views, gltf_accessors, gltf_meshes,
      gltf_nodes, gltf_root_nodes) = _convert_nodes(rsm_obj.version, nodes,
@@ -62,14 +70,18 @@ def convert_rsm(rsm_file: str,
     else:
         fps = None
 
+    _LOGGER.info("Converting animations ...")
     resources = _convert_animations(rsm_obj.version, fps, nodes, gltf_model)
     gltf_resources += resources
 
-    gltf = GLTF(model=gltf_model, resources=gltf_resources)
     if glb:
-        gltf.export(rsm_file_path.with_suffix(".glb").name)
+        destination_path = rsm_file_path.with_suffix(".glb").name
     else:
-        gltf.export(rsm_file_path.with_suffix(".gltf").name)
+        destination_path = rsm_file_path.with_suffix(".gltf").name
+
+    gltf = GLTF(model=gltf_model, resources=gltf_resources)
+    gltf.export(destination_path)
+    _LOGGER.info(f"Converted model has been saved as '{destination_path}'")
 
 
 def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
