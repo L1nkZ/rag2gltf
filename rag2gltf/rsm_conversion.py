@@ -2,8 +2,10 @@ import copy
 import io
 import logging
 import math
+import multiprocessing as mp
 import struct
 import typing
+from functools import partial
 from pathlib import Path, PureWindowsPath
 
 import glm  # type: ignore
@@ -116,37 +118,53 @@ def _convert_textures(
     else:
         texture_list = rsm_obj.texture_names
 
-    for tex_id, name_1252 in enumerate(texture_list):
-        texture_path = PureWindowsPath(decode_string(name_1252))
-        full_texture_path = data_folder_path / "texture" / texture_path
-        texture_data: typing.Union[io.BytesIO, typing.BinaryIO]
+    # Convert textures in parallel
+    with mp.Pool() as pool:
+        convert_texture = partial(_convert_texture,
+                                  data_folder_path=data_folder_path)
+        result_list = pool.map(
+            convert_texture,
+            map(lambda t: (t[0], decode_string(t[1])),
+                enumerate(texture_list)))
 
-        alpha_mode = "MASK"
-        if texture_path.suffix.lower() == ".bmp":
-            texture_data = convert_bmp_to_png(full_texture_path)
-            dest_path = texture_path.with_suffix(".png")
-        elif texture_path.suffix.lower() == ".tga":
-            alpha_mode = "BLEND"
-            texture_data = convert_tga_to_png(full_texture_path)
-            dest_path = texture_path.with_suffix(".png")
-        else:
-            texture_data = full_texture_path.open("rb")
-            dest_path = texture_path
-
-        gltf_resources.append(
-            FileResource(dest_path.name, data=texture_data.read()))
-        gltf_images.append(Image(uri=dest_path.name, mimeType="image/png"))
-        gltf_textures.append(Texture(sampler=0, source=tex_id))
-        gltf_materials.append(
-            Material(pbrMetallicRoughness=PBRMetallicRoughness(
-                baseColorTexture=TextureInfo(index=tex_id),
-                metallicFactor=0.0,
-                roughnessFactor=1.0),
-                     doubleSided=True,
-                     alphaMode=alpha_mode))
+    for material, texture, image, resource in result_list:
+        gltf_resources.append(resource)
+        gltf_images.append(image)
+        gltf_textures.append(texture)
+        gltf_materials.append(material)
 
     return (gltf_resources, gltf_images, gltf_textures, gltf_materials,
             tex_id_by_node)
+
+
+def _convert_texture(
+    tex_info: typing.Tuple[int, str], data_folder_path: Path
+) -> typing.Tuple[Material, Texture, Image, FileResource]:
+    tex_id, texture_name = tex_info
+    texture_path = PureWindowsPath(texture_name)
+    full_texture_path = data_folder_path / "texture" / texture_path
+
+    texture_data: typing.Union[io.BytesIO, typing.BinaryIO]
+    alpha_mode = "MASK"
+    if texture_path.suffix.lower() == ".bmp":
+        texture_data = convert_bmp_to_png(full_texture_path)
+        dest_path = texture_path.with_suffix(".png")
+    elif texture_path.suffix.lower() == ".tga":
+        alpha_mode = "BLEND"
+        texture_data = convert_tga_to_png(full_texture_path)
+        dest_path = texture_path.with_suffix(".png")
+    else:
+        texture_data = full_texture_path.open("rb")
+        dest_path = texture_path
+
+    return (Material(pbrMetallicRoughness=PBRMetallicRoughness(
+        baseColorTexture=TextureInfo(index=tex_id),
+        metallicFactor=0.0,
+        roughnessFactor=1.0),
+                     doubleSided=True,
+                     alphaMode=alpha_mode), Texture(sampler=0, source=tex_id),
+            Image(uri=dest_path.name, mimeType="image/png"),
+            FileResource(dest_path.name, data=texture_data.read()))
 
 
 def _convert_nodes(rsm_version: int, nodes: typing.List[AbstractNode],
