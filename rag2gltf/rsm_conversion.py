@@ -4,6 +4,7 @@ import logging
 import math
 import multiprocessing as mp
 import struct
+import sys
 from functools import partial
 from pathlib import Path, PureWindowsPath
 from typing import List, Dict, Union, Tuple, Optional, BinaryIO
@@ -14,7 +15,7 @@ from gltflib import (  # type: ignore
     BufferView, Accessor, AccessorType, BufferTarget, ComponentType,
     FileResource, Image, Sampler, Texture, Material, PBRMetallicRoughness,
     TextureInfo, Animation, AnimationSampler, Channel, Target)
-from kaitaistruct import KaitaiStream  # type: ignore
+from kaitaistruct import KaitaiStream, ValidationNotEqualError  # type: ignore
 
 from bounding_box import calculate_model_bounding_box, BoundingBox
 from image_conversion import convert_bmp_to_png, convert_tga_to_png
@@ -33,7 +34,14 @@ def convert_rsm(rsm_file: str,
 
     _LOGGER.info(f"Converting RSM file '{rsm_file}'")
     rsm_file_path = Path(rsm_file)
-    rsm_obj = _parse_rsm_file(rsm_file_path)
+    try:
+        rsm_obj = _parse_rsm_file(rsm_file_path)
+    except FileNotFoundError:
+        _LOGGER.error(f"'{rsm_file_path}' isn't a file or doesn't exist")
+        sys.exit(1)
+    except ValidationNotEqualError as ex:
+        _LOGGER.error(f"Invalid RSM file: {ex}")
+        sys.exit(1)
 
     gltf_model = GLTFModel(
         asset=Asset(version='2.0', generator="rag2gltf"),
@@ -56,8 +64,13 @@ def convert_rsm(rsm_file: str,
 
     gltf_resources: List[FileResource] = []
     _LOGGER.info("Converting textures ...")
-    resources, tex_id_by_node = _convert_textures(rsm_obj, Path(data_folder),
-                                                  gltf_model)
+    try:
+        resources, tex_id_by_node = _convert_textures(rsm_obj,
+                                                      Path(data_folder),
+                                                      gltf_model)
+    except FileNotFoundError as ex:
+        _LOGGER.error(f"Cannot find texture file: {ex}")
+        sys.exit(1)
     gltf_resources += resources
 
     _LOGGER.info("Converting 3D model ...")
@@ -85,6 +98,8 @@ def convert_rsm(rsm_file: str,
     gltf = GLTF(model=gltf_model, resources=gltf_resources)
     gltf.export(destination_path)
     _LOGGER.info(f"Converted model has been saved as '{destination_path}'")
+
+    sys.exit()
 
 
 def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
