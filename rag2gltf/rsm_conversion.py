@@ -481,7 +481,6 @@ def _convert_animations(rsm_version: int,
                         frame_rate_per_second: typing.Optional[float],
                         nodes: typing.List[AbstractNode],
                         gltf_model: GLTFModel) -> typing.List[FileResource]:
-    gltf_model.animations = []
     gltf_resources = []
 
     if frame_rate_per_second:
@@ -611,7 +610,7 @@ def _convert_animations(rsm_version: int,
                              componentType=ComponentType.FLOAT.value,
                              count=scale_frame_count,
                              type=AccessorType.SCALAR.value,
-                             min=[0.0],
+                             min=[min(input_values)],
                              max=[max(input_values)]),
                     Accessor(bufferView=curr_buffer_view_id + 1,
                              byteOffset=0,
@@ -671,7 +670,7 @@ def _convert_animations(rsm_version: int,
                              componentType=ComponentType.FLOAT.value,
                              count=translation_frame_count,
                              type=AccessorType.SCALAR.value,
-                             min=[0.0],
+                             min=[min(input_values)],
                              max=[max(input_values)]),
                     Accessor(bufferView=curr_buffer_view_id + 1,
                              byteOffset=0,
@@ -727,6 +726,6 @@ def _convert_animations(rsm_version: int,
             gltf_model.buffers[pos_buffer_id].uri = pos_file_name
             gltf_model.buffers[pos_buffer_id].byteLength = len(pos_data)
 
-        gltf_model.animations.append(model_anim)
+        gltf_model.animations = [model_anim]
 
     return gltf_resources
