@@ -9,7 +9,6 @@ install:
   - "SET PATH=%PYTHON%;%PYTHON%\\Scripts;%PATH%"
   - python -m pip install -r requirements.txt
   - python -m pip install pyinstaller
-  - choco install upx
 
 build_script:
   - pyinstaller -F rag2gltf/__main__.py
