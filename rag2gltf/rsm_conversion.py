@@ -123,21 +123,20 @@ def _parse_rsm_file(rsm_file_path: Path) -> Rsm:
 
 def _convert_textures(
         rsm_obj: Rsm, data_folder_path: Path,
-        gltf_model: GLTFModel) -> Tuple[List[FileResource], Dict[str, list]]:
-    tex_id_by_node: Dict[str, list] = {}
+        gltf_model: GLTFModel) -> Tuple[List[FileResource], List[List[int]]]:
+    tex_id_by_node: List[List[int]] = [[]] * len(rsm_obj.nodes)
 
     if rsm_obj.version >= 0x203:
         texture_list: List[Rsm.String] = []
-        for node in rsm_obj.nodes:
-            node_name = decode_string(node.name)
-            tex_id_by_node[node_name] = []
+        for node_id, node in enumerate(rsm_obj.nodes):
+            tex_id_by_node[node_id] = []
             for texture in node.texture_names:
                 try:
                     tex_id = texture_list.index(texture)
-                    tex_id_by_node[node_name] += [tex_id]
+                    tex_id_by_node[node_id] += [tex_id]
                 except ValueError:
                     texture_list.append(texture)
-                    tex_id_by_node[node_name] += [len(texture_list) - 1]
+                    tex_id_by_node[node_id] += [len(texture_list) - 1]
     else:
         texture_list = rsm_obj.texture_names
 
@@ -192,7 +191,7 @@ def _convert_texture(
 
 def _convert_nodes(
         rsm_version: int, nodes: List[AbstractNode],
-        tex_id_by_node: Dict[str, list],
+        tex_id_by_node: List[List[int]],
         gltf_model: GLTFModel) -> Tuple[List[FileResource], List[int]]:
     root_nodes = []
 
@@ -218,7 +217,7 @@ def _convert_nodes(
                 nodes_children[parent_name] = [node_id]
 
         if rsm_version >= 0x203:
-            node_tex_ids = tex_id_by_node[node_name]
+            node_tex_ids = tex_id_by_node[node_id]
         else:
             node_tex_ids = rsm_node.texture_ids
         vertices_by_texture = _sort_vertices_by_texture(rsm_node, node_tex_ids)
@@ -300,8 +299,10 @@ def _convert_nodes(
     ]
 
     # Update nodes' children
+    # Note(LinkZ): Consume children with `pop` to avoid issues with models
+    # containing multiple nodes with the same name
     for gltf_node in gltf_model.nodes:
-        gltf_node.children = nodes_children.get(gltf_node.name)
+        gltf_node.children = nodes_children.pop(gltf_node.name, None)
 
     return gltf_resources, root_nodes
 
