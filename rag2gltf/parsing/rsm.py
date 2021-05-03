@@ -1,8 +1,8 @@
 # This is a generated file! Please edit source .ksy file and use kaitai-struct-compiler to rebuild
 
 from pkg_resources import parse_version
-import kaitaistruct  # type: ignore
-from kaitaistruct import KaitaiStruct, KaitaiStream, BytesIO  # type: ignore
+import kaitaistruct
+from kaitaistruct import KaitaiStruct, KaitaiStream, BytesIO
 from enum import Enum
 
 if parse_version(kaitaistruct.__version__) < parse_version('0.9'):
@@ -44,6 +44,10 @@ class Rsm(KaitaiStruct):
 
         if self._root.version <= 514:
             self.texture_count = self._io.read_s4le()
+            _ = self.texture_count
+            if not _ <= 1024:
+                raise kaitaistruct.ValidationExprError(self.texture_count,
+                                                       self._io, u"/seq/7")
 
         if self._root.version <= 514:
             self.texture_names = [None] * (self.texture_count)
@@ -52,6 +56,10 @@ class Rsm(KaitaiStruct):
 
         if self._root.version >= 514:
             self.root_node_count = self._io.read_s4le()
+            _ = self.root_node_count
+            if not _ <= 1024:
+                raise kaitaistruct.ValidationExprError(self.root_node_count,
+                                                       self._io, u"/seq/9")
 
         if self._root.version >= 514:
             self.root_node_names = [None] * (self.root_node_count)
@@ -63,12 +71,20 @@ class Rsm(KaitaiStruct):
             self.root_node_name = Rsm.String(self._io, self, self._root)
 
         self.node_count = self._io.read_s4le()
+        _ = self.node_count
+        if not _ <= 1024:
+            raise kaitaistruct.ValidationExprError(self.node_count, self._io,
+                                                   u"/seq/12")
         self.nodes = [None] * (self.node_count)
         for i in range(self.node_count):
             self.nodes[i] = Rsm.Node(self._io, self, self._root)
 
         if self._root.version < 262:
             self.scale_key_count = self._io.read_s4le()
+            _ = self.scale_key_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(self.scale_key_count,
+                                                       self._io, u"/seq/14")
 
         if self._root.version < 262:
             self.scale_key_frames = [None] * (self.scale_key_count)
@@ -78,6 +94,10 @@ class Rsm(KaitaiStruct):
 
         if not (self._io.is_eof()):
             self.volume_box_count = self._io.read_s4le()
+            _ = self.volume_box_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(self.volume_box_count,
+                                                       self._io, u"/seq/16")
 
         if not (self._io.is_eof()):
             self.volume_boxes = [None] * (self.volume_box_count)
@@ -120,16 +140,13 @@ class Rsm(KaitaiStruct):
                 self.texture_vertex_ids[i] = self._io.read_u2le()
 
             self.texture_id = self._io.read_u2le()
-            self.padding = self._io.read_u2le()
+            self.padding1 = self._io.read_u2le()
             self.two_sides = self._io.read_s4le()
             if self._root.version >= 258:
-                self.smooth_group_x = self._io.read_s4le()
+                self.smooth_group = self._io.read_s4le()
 
             if ((self._root.version >= 514) and (self.length > 24)):
-                self.smooth_group_y = self._io.read_s4le()
-
-            if ((self._root.version >= 514) and (self.length > 28)):
-                self.smooth_group_z = self._io.read_s4le()
+                self.padding2 = self._io.read_bytes((self.length - 24))
 
     class PosKeyFrame(KaitaiStruct):
         def __init__(self, _io, _parent=None, _root=None):
@@ -169,6 +186,11 @@ class Rsm(KaitaiStruct):
         def _read(self):
             self.type = self._io.read_s4le()
             self.tex_frame_count = self._io.read_s4le()
+            _ = self.tex_frame_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(
+                    self.tex_frame_count, self._io,
+                    u"/types/tex_animation/seq/1")
             self.tex_key_frames = [None] * (self.tex_frame_count)
             for i in range(self.tex_frame_count):
                 self.tex_key_frames[i] = Rsm.TextureKeyFrame(
@@ -241,6 +263,10 @@ class Rsm(KaitaiStruct):
         def _read(self):
             if self._root.version > 512:
                 self.len = self._io.read_s4le()
+                _ = self.len
+                if not _ <= 1024:
+                    raise kaitaistruct.ValidationExprError(
+                        self.len, self._io, u"/types/string/seq/0")
 
             self.value = self._io.read_bytes(
                 (self.len if self._root.version > 512 else 40))
@@ -279,6 +305,11 @@ class Rsm(KaitaiStruct):
             self.name = Rsm.String(self._io, self, self._root)
             self.parent_name = Rsm.String(self._io, self, self._root)
             self.texture_count = self._io.read_s4le()
+            _ = self.texture_count
+            if not _ <= 1024:
+                raise kaitaistruct.ValidationExprError(self.texture_count,
+                                                       self._io,
+                                                       u"/types/node/seq/2")
             if self._root.version >= 515:
                 self.texture_names = [None] * (self.texture_count)
                 for i in range(self.texture_count):
@@ -292,24 +323,42 @@ class Rsm(KaitaiStruct):
 
             self.info = Rsm.NodeInfo(self._io, self, self._root)
             self.mesh_vertex_count = self._io.read_s4le()
+            _ = self.mesh_vertex_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(self.mesh_vertex_count,
+                                                       self._io,
+                                                       u"/types/node/seq/6")
             self.mesh_vertices = [None] * (self.mesh_vertex_count)
             for i in range(self.mesh_vertex_count):
                 self.mesh_vertices[i] = Rsm.MeshVertex(self._io, self,
                                                        self._root)
 
             self.texture_vertex_count = self._io.read_s4le()
+            _ = self.texture_vertex_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(
+                    self.texture_vertex_count, self._io, u"/types/node/seq/8")
             self.texture_vertices = [None] * (self.texture_vertex_count)
             for i in range(self.texture_vertex_count):
                 self.texture_vertices[i] = Rsm.TextureVertex(
                     self._io, self, self._root)
 
             self.face_count = self._io.read_s4le()
+            _ = self.face_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(self.face_count,
+                                                       self._io,
+                                                       u"/types/node/seq/10")
             self.faces = [None] * (self.face_count)
             for i in range(self.face_count):
                 self.faces[i] = Rsm.FaceInfo(self._io, self, self._root)
 
             if self._root.version >= 262:
                 self.scale_key_count = self._io.read_s4le()
+                _ = self.scale_key_count
+                if not _ <= 65536:
+                    raise kaitaistruct.ValidationExprError(
+                        self.scale_key_count, self._io, u"/types/node/seq/12")
 
             if self._root.version >= 262:
                 self.scale_key_frames = [None] * (self.scale_key_count)
@@ -318,6 +367,11 @@ class Rsm(KaitaiStruct):
                         self._io, self, self._root)
 
             self.rot_key_count = self._io.read_s4le()
+            _ = self.rot_key_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(self.rot_key_count,
+                                                       self._io,
+                                                       u"/types/node/seq/14")
             self.rot_key_frames = [None] * (self.rot_key_count)
             for i in range(self.rot_key_count):
                 self.rot_key_frames[i] = Rsm.RotKeyFrame(
@@ -325,6 +379,10 @@ class Rsm(KaitaiStruct):
 
             if self._root.version >= 514:
                 self.pos_key_count = self._io.read_s4le()
+                _ = self.pos_key_count
+                if not _ <= 65536:
+                    raise kaitaistruct.ValidationExprError(
+                        self.pos_key_count, self._io, u"/types/node/seq/16")
 
             if self._root.version >= 514:
                 self.pos_key_frames = [None] * (self.pos_key_count)
@@ -334,6 +392,11 @@ class Rsm(KaitaiStruct):
 
             if self._root.version >= 515:
                 self.animated_texture_count = self._io.read_s4le()
+                _ = self.animated_texture_count
+                if not _ <= 65536:
+                    raise kaitaistruct.ValidationExprError(
+                        self.animated_texture_count, self._io,
+                        u"/types/node/seq/18")
 
             if self._root.version >= 515:
                 self.animated_textures = [None] * (self.animated_texture_count)
@@ -366,6 +429,11 @@ class Rsm(KaitaiStruct):
         def _read(self):
             self.texture_id = self._io.read_s4le()
             self.animation_count = self._io.read_s4le()
+            _ = self.animation_count
+            if not _ <= 65536:
+                raise kaitaistruct.ValidationExprError(
+                    self.animation_count, self._io,
+                    u"/types/animated_texture/seq/1")
             self.tex_animations = [None] * (self.animation_count)
             for i in range(self.animation_count):
                 self.tex_animations[i] = Rsm.TexAnimation(
