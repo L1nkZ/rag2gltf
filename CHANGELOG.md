@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2021-05-04
+# Fixed
+- Fix parsing of certain RSM models
+- Avoid memory exhaustion issues when parsing corrupt RSM models
+
 ## [0.1.2] - 2021-04-28
 # Fixed
 - Fix conversion of RSM models containing multiple nodes with the same name
